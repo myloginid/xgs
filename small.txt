@@ -1,0 +1,127 @@
+
+
+
+
+
+Cloudera Professional Services
+Locating, Identifying and Processing Small Files
+
+
+
+30 May 2017
+Manish Maheshwari, Senior Solutions Architect
+
+Locating, Identifying and Processing Small Files
+
+Run the following command to list out all the file sizes and locations
+
+	export HADOOP_OPTS="-XX:-UseGCOverheadLimit $HADOOP_OPTS"
+export HADOOP_CLIENT_OPTS="-Xmx20480m $HADOOP_CLIENT_OPTS"
+hadoop fsck / -files -blocks -locations | grep '1 block(s):  OK' | awk '{printf ("%s, %s\n",$(NF - 4),$1)}' > 1_block_files_withoutspaces.csv
+
+Notes - 
+Don't use OS disk. Depending on the cluster size, the file could be > 30/40 GB.
+Bump up the JVM heap further hadoop client if you need to
+
+Example data:
+
+	98,/alpha/AIE/Upfronts/Index.txt
+4773112,/alpha/AIE/Upfronts/User_Upload_20131029.csv
+
+I chose to use sql + hive to do the analysis. If you are more comfortable with excel, I am sure there are ways to do this in excel as well.
+
+Upload the file to a location in hdfs
+
+	hadoop fs -mkdir /tmp/small_files
+hadoop fs -put 1_block_files_withoutspaces.csv /tmp/small_files
+
+
+Created a table on top of this
+
+CREATE EXTERNAL TABLE stg.small_files (
+  size INT,
+  path STRING
+)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+WITH SERDEPROPERTIES ('serialization.format'=',', 'field.delim'=',')
+STORED AS TEXTFILE
+LOCATION 'hdfs://nameservice1/tmp/small_files'
+
+
+To find the largest contributors to the small files problem on a folder-by-folder basis you can run the following query in either Hive. Please note that the following query is only grouping for files that are smaller than or equal to 1MB:
+
+	
+	select parent_path, count(*) as small_file_count, round(avg(size)/1024,0) as small_file_size_kb  from
+(select path ,reverse(SUBSTRING(reverse(path),locate('/', reverse(path)) + 1 )) as parent_path,  size from small_files where size <=10000000) a
+group by a.parent_path
+having count(*) > 100
+order by small_file_count desc; 
+
+Example Output:
++-------------------------------------------------------------------------------------------------------------------------------+
+| trim(parent_path)       | small_file_count | small_file_size_kb |
++-------------------------------------------------------------------------------------------------------------------------------+
+| /user/hive/warehouse/it.db/fdn_beeline_pokemon_go   | 55190            | 17                 |
+| /user/hive/warehouse/it.db/agy_rafi_final           | 52365            | 3                  |
+| /user/hive/warehouse/wa2.db/fnk_bcp_usage_201706    | 33729            | 2821               |
+| /user/hive/warehouse/wa2.db/fdn_user_acq_influenced_apps  | 33728      | 1                  |
+
+
+
+
+The following queries can be run in Hive to group by folders on level 1, 2 and 3 respectively. I have highlighted the part of the query that is changed to change the grouping level:
+
+
+-- grouped by level1 
+select path_level1, count(*) as small_file_count, round(avg(size)/1024,0) as small_file_size_kb from
+(select path ,reverse(
+           SUBSTRING(reverse(path),
+               locate('/', reverse(path)) + 1 )
+       ) as parent_path,
+       concat('/',split(path, '/')[1]) as path_level1,
+       concat('/',split(path, '/')[1], '/', split(path, '/')[2]) as path_level2,
+       concat('/',split(path, '/')[1], '/', split(path, '/')[2], '/', split(path, '/')[3]) as path_level3,
+       concat('/',split(path, '/')[1], '/', split(path, '/')[2], '/', split(path, '/')[3], '/',split(path, '/')[4]) as path_level4,
+       size from small_files where size <=1000000) a
+group by a.path_level1 order by small_file_count desc;       
+
+Example Output:
+/data, 1176562
+/tmp, 773390
+      
+-- grouped by level2        
+select path_level2, count(*) as small_file_count, round(avg(size)/1024,0) as small_file_size_kb from
+(select path ,reverse(
+           SUBSTRING(reverse(path),
+               locate('/', reverse(path)) + 1 )
+       ) as parent_path,
+       concat('/',split(path, '/')[1]) as path_level1,
+       concat('/',split(path, '/')[1], '/', split(path, '/')[2]) as        concat('/',split(path, '/')[1], '/', split(path, '/')[2], '/', split(path, '/')[3]) as path_level3,
+       concat('/',split(path, '/')[1], '/', split(path, '/')[2], '/', split(path, '/')[3], '/',split(path, '/')[4]) as path_level4,
+       size from small_files where size <=1000000) a
+group by a.path_level2 order by small_file_count desc limit 10;       
+
+Example Output:
+/tmp/logs, 759155
+/tools/datameer, 645781
+
+-- grouped by level3        
+select path_level3, count(*) as small_file_count, round(avg(size)/1024,0) as small_file_size_kb from
+(select path ,reverse(
+           SUBSTRING(reverse(path),
+               locate('/', reverse(path)) + 1 ) path_level2,
+
+       ) as parent_path,
+       concat('/',split(path, '/')[1]) as path_level1,
+       concat('/',split(path, '/')[1], '/', split(path, '/')[2]) as path_level2,
+       concat('/',split(path, '/')[1], '/', split(path, '/')[2], '/', split(path, '/')[3]) as path_level3,
+       concat('/',split(path, '/')[1], '/', split(path, '/')[2], '/', split(path, '/')[3], '/',split(path, '/')[4]) as path_level4,
+       size from small_files where size <=1000000) a
+group by a.path_level3 order by small_file_count desc limit 10;
+
+Example output:
+/platfora/workspace/2015, 468749
+/tools/datameer/workbooks, 434869
+
+
+
