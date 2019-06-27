@@ -1,0 +1,16 @@
+
+hdfs dfs -rm -r -f /user/cdh/TS_input1
+hdfs dfs -rm -r -f /user/cdh/TS_input3
+hdfs dfs -rm -r -f /user/cdh/TS_output1
+hdfs dfs -rm -r -f /user/cdh/TS_output3
+hdfs dfs -rm -r -f /user/cdh/TS_input3x
+hdfs dfs -rm -r -f /user/cdh/TS_output3x
+
+export JAR=/opt/cloudera/parcels/CDH/lib/hadoop-mapreduce/hadoop-mapreduce-examples.jar
+export opts="-Dmapreduce.reduce.memory.mb=4096 -Dyarn.app.mapreduce.am.resource.mb=3048"
+time yarn jar $JAR teragen -Dmapreduce.job.maps=208 -Ddfs.replication=1 $opts 10000000000 /user/cdh/TS_input1
+time yarn jar $JAR teragen -Dmapreduce.job.maps=208 -Ddfs.replication=3 $opts 10000000000 /user/cdh/TS_input3
+time yarn jar $JAR teragen -Dmapreduce.job.maps=208 -Ddfs.replication=3 $opts 40000000000 /user/cdh/TS_input3x
+time yarn jar $JAR terasort -Dmapreduce.job.maps=208 -Ddfs.replication=1 $opts /user/cdh/TS_input1 /user/cdh/TS_output1
+time yarn jar $JAR terasort -Dmapreduce.job.maps=208 -Ddfs.replication=3 $opts /user/cdh/TS_input3 /user/cdh/TS_output3
+time yarn jar $JAR terasort -Dmapreduce.job.maps=208 -Ddfs.replication=3 $opts /user/cdh/TS_input3x /user/cdh/TS_output3x
